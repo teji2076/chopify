@@ -429,7 +429,8 @@ def main():
               "faster-whisper, opencv)", flush=True)
 
     import projects
-    options = {k: (getattr(args, k, None) if getattr(args, k, None) is not None else default)\n               for k, default in projects.DEFAULT_OPTIONS.items() if k != "caption"}
+    options = {k: (getattr(args, k, None) if getattr(args, k, None) is not None else default)
+               for k, default in projects.DEFAULT_OPTIONS.items() if k != "caption"}
     options["caption"] = caption
     if options["min_score"] is None:
         options["min_score"] = 8.0
