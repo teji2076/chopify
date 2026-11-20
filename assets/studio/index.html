@@ -53,7 +53,10 @@
             <h2>Start with your footage</h2>
             <span>ONE VIDEO OR A WHOLE QUEUE</span>
           </div>
-          <label for="sources">Video URLs or local file paths</label>
+          <label for="video-upload">Upload a video (up to 2 GB)</label>
+<input id="video-upload" type="file" accept="video/*,.mkv,.m4v" />
+<p id="upload-status" role="status"></p>
+<label for="sources">Video URLs or local file paths</label>
           <textarea
             id="sources"
             rows="4"
@@ -82,8 +85,8 @@
               >Transcription model<select id="new-model">
                 <option>tiny</option>
                 <option>base</option>
-                <option>small</option>
-                <option selected>medium</option>
+                <option selected>small</option>
+                <option>medium</option>
                 <option>large-v3</option>
               </select></label
             >
