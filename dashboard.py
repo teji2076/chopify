@@ -225,7 +225,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def valid_host(self):
-        return self.headers.get("Host") in {f"127.0.0.1:{self.server.server_port}", urlsplit(os.environ.get("CHOPIFY_ORIGIN", "")).netloc} - {""}
+        return self.headers.get("Host") in {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}", urlsplit(os.environ.get("CHOPIFY_ORIGIN", "")).netloc} - {""}
 
     def do_GET(self):
         if not self.valid_host():
