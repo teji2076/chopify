@@ -47,25 +47,36 @@ function notice(message, error = false) {
     error ? 15000 : 6000,
   );
 }
-async function api(path, data) {
-  const response = await fetch(
-    path,
-    data === undefined
-      ? {}
-      : {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-Chopify-Token": state.token,
-          },
-          body: JSON.stringify(data),
-        },
-  );
-  const result = await response.json();
-  if (!response.ok)
-    throw new Error(result.error || `Request failed (${response.status})`);
+async function readApiResponse(response) {
+  const text = await response.text();
+  let result;
+  try { result = JSON.parse(text); }
+  catch (_) {
+    if (response.status === 413) throw new Error("This upload exceeded the connection limit. Try a smaller video.");
+    throw new Error("The Codespace connection returned an HTML page instead of an API response. Reopen Studio and retry. HTTP " + response.status);
+  }
   return result;
 }
+async function freshToken() {
+  const response = await fetch("/api/config", {cache: "no-store"});
+  const result = await readApiResponse(response);
+  if (!response.ok || !result.token) throw new Error(result.error || "Could not connect to Studio.");
+  state.token = result.token;
+}
+async function api(path, data) {
+  if (data !== undefined) await freshToken();
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const response = await fetch(path, data === undefined ? {cache:"no-store"} : {
+      method:"POST", headers:{"Content-Type":"application/json","X-Chopify-Token":state.token},
+      body:JSON.stringify(data)
+    });
+    const result = await readApiResponse(response);
+    if (response.status === 403 && result.code === "session_expired" && attempt === 0) { await freshToken(); continue; }
+    if (!response.ok) throw new Error(result.error || "Request failed (" + response.status + ")");
+    return result;
+  }
+}
+
 function safe(handler) {
   return async (event) => {
     try {
@@ -1257,18 +1268,28 @@ safe(async () => {
   draw();
 })();
 
-// Local uploads stay in this private instance; no external processing service.
+// Send bounded chunks so a large video does not exceed the private tunnel's request limit.
 $("#video-upload").addEventListener("change", async (event) => {
-  const input = event.target, file = input.files[0], label = $("#upload-status");
+  const input=event.target, file=input.files[0], label=$("#upload-status");
   if (!file) return;
-  if (file.size > 2 * 1024 ** 3) { label.textContent = "Choose a video smaller than 2 GB."; return; }
-  input.disabled = true; label.textContent = "Uploading video…";
+  if (!file.size || file.size>2*1024**3) { label.textContent="Choose a video between 1 byte and 2 GB."; return; }
+  input.disabled=true;
   try {
-    const response = await fetch("/api/upload", {method: "POST", headers: {"X-Chopify-Token": state.token, "X-Filename": "video." + file.name.split(".").pop().toLowerCase()}, body: file});
-    const result = await response.json();
-    if (!response.ok) throw new Error(result.error || "Upload failed");
-    $("#sources").value = [$("#sources").value.trim(), result.source].filter(Boolean).join("\n");
-    label.textContent = "Video ready. Press Find clips to continue.";
-  } catch (error) { label.textContent = error.message; }
-  finally { input.disabled = false; input.value = ""; }
+    await freshToken();
+    const upload=crypto.randomUUID().replaceAll("-",""), chunkSize=4*1024*1024;
+    let result;
+    for (let offset=0; offset<file.size; offset+=chunkSize) {
+      const end=Math.min(offset+chunkSize,file.size);
+      label.textContent="Uploading "+Math.round(offset/file.size*100)+"%…";
+      const response=await fetch("/api/upload", {method:"POST",headers:{
+        "X-Chopify-Token":state.token,"X-Filename":"video."+file.name.split(".").pop().toLowerCase(),
+        "X-Upload-ID":upload,"Content-Range":"bytes "+offset+"-"+(end-1)+"/"+file.size
+      },body:file.slice(offset,end)});
+      result=await readApiResponse(response);
+      if(!response.ok) throw new Error(result.error||"Upload failed");
+    }
+    $("#sources").value=[$("#sources").value.trim(),result.source].filter(Boolean).join("\n");
+    label.textContent="Video ready. Press Find clips to continue.";
+  } catch(error) { label.textContent=error.message; }
+  finally { input.disabled=false; input.value=""; }
 });
