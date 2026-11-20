@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-mkdir -p projects
+mkdir -p projects .cache
+export HF_HOME="$PWD/.cache/huggingface"
+export XDG_CACHE_HOME="$PWD/.cache"
 if [ ! -x .venv/bin/python ]; then
  python3 -m venv .venv
  .venv/bin/pip install -r requirements.txt
