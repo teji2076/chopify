@@ -1256,3 +1256,19 @@ safe(async () => {
   }
   draw();
 })();
+
+// Local uploads stay in this private instance; no external processing service.
+$("#video-upload").addEventListener("change", async (event) => {
+  const input = event.target, file = input.files[0], label = $("#upload-status");
+  if (!file) return;
+  if (file.size > 2 * 1024 ** 3) { label.textContent = "Choose a video smaller than 2 GB."; return; }
+  input.disabled = true; label.textContent = "Uploading video…";
+  try {
+    const response = await fetch("/api/upload", {method: "POST", headers: {"X-Chopify-Token": state.token, "X-Filename": "video." + file.name.split(".").pop().toLowerCase()}, body: file});
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || "Upload failed");
+    $("#sources").value = [$("#sources").value.trim(), result.source].filter(Boolean).join("\n");
+    label.textContent = "Video ready. Press Find clips to continue.";
+  } catch (error) { label.textContent = error.message; }
+  finally { input.disabled = false; input.value = ""; }
+});
