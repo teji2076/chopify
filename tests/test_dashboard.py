@@ -213,3 +213,40 @@ def test_upload_accepts_playable_video(server, tmp_path):
         uploaded = Path(json.load(response)["source"])
     assert uploaded.parent == (httpd.app.root / "uploads").resolve()
     assert uploaded.is_file()
+
+
+def test_codespaces_localhost_origin_is_accepted(server):
+    httpd, base = server
+    origin = f"http://localhost:{httpd.server_port}"
+    result = request(base, "/api/projects", {"source": "video.mp4", "options": {}}, httpd.app.token, origin)
+    assert result["id"]
+
+
+def test_chunked_video_upload_round_trip(server, tmp_path):
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg required")
+    httpd, base = server
+    source = tmp_path / "chunked.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=size=160x90:duration=1", "-c:v", "libx264", str(source)], check=True)
+    data = source.read_bytes()
+    middle = len(data)//2
+    upload = "a"*32
+    for offset, end in [(0,middle),(middle,len(data))]:
+        req = urllib.request.Request(base+"/api/upload", data=data[offset:end], headers={
+            "X-Chopify-Token":httpd.app.token, "X-Filename":"video.mp4",
+            "X-Upload-ID":upload, "Content-Range":f"bytes {offset}-{end-1}/{len(data)}",
+            "Origin":f"http://localhost:{httpd.server_port}"})
+        with urllib.request.urlopen(req) as response:
+            result=json.load(response)
+    assert Path(result["source"]).read_bytes() == data
+
+
+def test_stale_token_returns_retryable_code(server):
+    httpd, base = server
+    req = urllib.request.Request(base+"/api/projects",data=b"{}",headers={"X-Chopify-Token":"stale"})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req)
+    assert json.load(exc.value)["code"] == "session_expired"
