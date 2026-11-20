@@ -4,6 +4,8 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import mimetypes
+import os
+import uuid
 from pathlib import Path
 import re
 import secrets
@@ -223,7 +225,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def valid_host(self):
-        return self.headers.get("Host") == f"127.0.0.1:{self.server.server_port}"
+        return self.headers.get("Host") in {f"127.0.0.1:{self.server.server_port}", urlsplit(os.environ.get("CHOPIFY_ORIGIN", "")).netloc} - {""}
 
     def do_GET(self):
         if not self.valid_host():
@@ -308,11 +310,36 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         origin = self.headers.get("Origin")
         expected = f"http://127.0.0.1:{self.server.server_port}"
-        if (not self.valid_host() or (origin is not None and origin != expected)
+        if (not self.valid_host() or (origin is not None and origin not in {expected, os.environ.get("CHOPIFY_ORIGIN", "")})
                 or not secrets.compare_digest(self.headers.get("X-Chopify-Token", ""), self.app.token)):
             return self.send_json({"error": "Request rejected. Reload Studio and retry."}, 403)
         try:
             length = int(self.headers.get("Content-Length", "0"))
+            if urlsplit(self.path).path == "/api/upload":
+                if not 0 < length <= 2 * 1024**3:
+                    return self.send_json({"error": "Choose a video smaller than 2 GB."}, 400)
+                suffix = Path(self.headers.get("X-Filename", "video.mp4")).suffix.lower()
+                if suffix not in {".mp4", ".mov", ".mkv", ".webm", ".m4v", ".avi"}:
+                    return self.send_json({"error": "Choose a supported video file."}, 400)
+                folder = self.app.root / "uploads"
+                folder.mkdir(parents=True, exist_ok=True)
+                target = folder / (uuid.uuid4().hex + suffix)
+                try:
+                    remaining = length
+                    with target.open("wb") as output:
+                        while remaining:
+                            chunk = self.rfile.read(min(1024 * 1024, remaining))
+                            if not chunk:
+                                raise ValueError("Upload interrupted. Please retry.")
+                            output.write(chunk)
+                            remaining -= len(chunk)
+                    result = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", str(target)], capture_output=True, text=True, timeout=30)
+                    if result.returncode or not json.loads(result.stdout).get("streams"):
+                        raise ValueError("The uploaded file is not a playable video.")
+                except Exception:
+                    target.unlink(missing_ok=True)
+                    raise
+                return self.send_json({"source": str(target.resolve())}, 201)
             if not 0 < length <= 10_000_000:
                 raise ValueError("Request must be JSON smaller than 10 MB.")
             body = json.loads(self.rfile.read(length))
