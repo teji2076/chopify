@@ -26,7 +26,7 @@ LIVE_DEFAULTS = {
 }
 
 DEFAULT_OPTIONS = {"aspect": "16:9", "fit": "cover", "style": "default", "tighten": False,
-                   "loudnorm": False, "whisper_model": "medium", "device": "cpu",
+                   "loudnorm": False, "whisper_model": "small", "device": "cpu",
                    "min_len": 15, "max_len": 300, "max_clips": None,
                    "min_score": 8.0, "preferred_len": None,
                    "llm": None, "search": None, "semantic": None,
