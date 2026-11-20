@@ -312,8 +312,7 @@ class Handler(BaseHTTPRequestHandler):
         expected = f"http://127.0.0.1:{self.server.server_port}"
         if not self.valid_host():
             return self.send_json({"error": "Open the configured Studio address.", "code": "invalid_host"}, 403)
-        if origin is not None and origin not in {expected, os.environ.get("CHOPIFY_ORIGIN", "")}:
-            print("Rejected Studio origin:", repr(origin), "expected:", repr(os.environ.get("CHOPIFY_ORIGIN", "")), flush=True)
+        if origin is not None and origin not in {expected, f"http://localhost:{self.server.server_port}", os.environ.get("CHOPIFY_ORIGIN", "")}:
             return self.send_json({"error": "Studio origin does not match this server.", "code": "invalid_origin"}, 403)
         if not secrets.compare_digest(self.headers.get("X-Chopify-Token", ""), self.app.token):
             return self.send_json({"error": "Studio session changed. Please retry.", "code": "session_expired"}, 403)
