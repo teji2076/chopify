@@ -327,16 +327,36 @@ class Handler(BaseHTTPRequestHandler):
                     return self.send_json({"error": "Choose a supported video file."}, 400)
                 folder = self.app.root / "uploads"
                 folder.mkdir(parents=True, exist_ok=True)
-                target = folder / (uuid.uuid4().hex + suffix)
+                upload_id = self.headers.get("X-Upload-ID")
+                content_range = self.headers.get("Content-Range")
+                offset, total, final = 0, length, True
+                if upload_id or content_range:
+                    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range or "")
+                    if not re.fullmatch(r"[a-f0-9]{32}", upload_id or "") or not match:
+                        raise ValueError("Invalid upload chunk.")
+                    offset, end, total = map(int, match.groups())
+                    if not (0 <= offset <= end < total <= 2 * 1024**3) or end-offset+1 != length or length > 4*1024**2:
+                        raise ValueError("Invalid upload chunk size.")
+                    final = end+1 == total
+                target = folder / ((upload_id or uuid.uuid4().hex) + suffix)
                 try:
-                    remaining = length
-                    with target.open("wb") as output:
-                        while remaining:
-                            chunk = self.rfile.read(min(1024 * 1024, remaining))
-                            if not chunk:
-                                raise ValueError("Upload interrupted. Please retry.")
-                            output.write(chunk)
-                            remaining -= len(chunk)
+                    with self.app.lock:
+                        if offset == 0:
+                            output = target.open("xb")
+                        else:
+                            if not target.is_file() or target.stat().st_size != offset:
+                                raise ValueError("Upload offset changed. Please select the file again.")
+                            output = target.open("ab")
+                        with output:
+                            remaining = length
+                            while remaining:
+                                chunk = self.rfile.read(min(1024 * 1024, remaining))
+                                if not chunk:
+                                    raise ValueError("Upload interrupted. Please retry.")
+                                output.write(chunk)
+                                remaining -= len(chunk)
+                    if not final:
+                        return self.send_json({"upload": upload_id, "offset": offset+length}, 200)
                     result = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", str(target)], capture_output=True, text=True, timeout=30)
                     if result.returncode or not json.loads(result.stdout).get("streams"):
                         raise ValueError("The uploaded file is not a playable video.")
