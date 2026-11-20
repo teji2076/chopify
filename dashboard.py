@@ -310,9 +310,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         origin = self.headers.get("Origin")
         expected = f"http://127.0.0.1:{self.server.server_port}"
-        if (not self.valid_host() or (origin is not None and origin not in {expected, os.environ.get("CHOPIFY_ORIGIN", "")})
-                or not secrets.compare_digest(self.headers.get("X-Chopify-Token", ""), self.app.token)):
-            return self.send_json({"error": "Request rejected. Reload Studio and retry."}, 403)
+        if not self.valid_host():
+            return self.send_json({"error": "Open the configured Studio address.", "code": "invalid_host"}, 403)
+        if origin is not None and origin not in {expected, os.environ.get("CHOPIFY_ORIGIN", "")}:
+            print("Rejected Studio origin:", repr(origin), "expected:", repr(os.environ.get("CHOPIFY_ORIGIN", "")), flush=True)
+            return self.send_json({"error": "Studio origin does not match this server.", "code": "invalid_origin"}, 403)
+        if not secrets.compare_digest(self.headers.get("X-Chopify-Token", ""), self.app.token):
+            return self.send_json({"error": "Studio session changed. Please retry.", "code": "session_expired"}, 403)
         try:
             length = int(self.headers.get("Content-Length", "0"))
             if urlsplit(self.path).path == "/api/upload":
