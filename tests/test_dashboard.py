@@ -169,3 +169,47 @@ def test_live_route_rejects_missing_token(server):
     with pytest.raises(urllib.error.HTTPError) as exc:
         request(base, "/api/live", {"source": "https://x/l.m3u8"})
     assert exc.value.code == 403
+
+from pathlib import Path
+
+
+def test_configured_private_origin_keeps_token_protection(server, monkeypatch):
+    httpd, base = server
+    monkeypatch.setenv("CHOPIFY_ORIGIN", "https://private-example.app.github.dev")
+    req = urllib.request.Request(base + "/api/config", headers={"Host": "private-example.app.github.dev"})
+    with urllib.request.urlopen(req) as response:
+        assert json.load(response)["token"] == httpd.app.token
+    req = urllib.request.Request(base + "/api/projects", data=b'{}', headers={
+        "Host": "private-example.app.github.dev", "Origin": "https://private-example.app.github.dev",
+        "Content-Type": "application/json"})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req)
+    assert exc.value.code == 403
+
+
+def test_upload_rejects_invalid_video_and_removes_partial_file(server):
+    httpd, base = server
+    req = urllib.request.Request(base + "/api/upload", data=b"not a video", headers={
+        "X-Chopify-Token": httpd.app.token, "X-Filename": "../../video.mp4"})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req)
+    assert exc.value.code == 400
+    assert not list((httpd.app.root / "uploads").glob("*"))
+
+
+def test_upload_accepts_playable_video(server, tmp_path):
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg required")
+    httpd, base = server
+    source = tmp_path / "fixture.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+                    "color=size=160x90:duration=1", "-c:v", "libx264", str(source)], check=True)
+    req = urllib.request.Request(base + "/api/upload", data=source.read_bytes(), headers={
+        "X-Chopify-Token": httpd.app.token, "X-Filename": "../../fixture.mp4"})
+    with urllib.request.urlopen(req) as response:
+        assert response.status == 201
+        uploaded = Path(json.load(response)["source"])
+    assert uploaded.parent == (httpd.app.root / "uploads").resolve()
+    assert uploaded.is_file()
